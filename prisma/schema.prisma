@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  role         String   @default("CUSTOMER") // ADMIN | VENDOR | WAREHOUSE | CUSTOMER
+  status       String   @default("ACTIVE") // ACTIVE | SUSPENDED
+  vendorId     String?
+  vendor       Vendor?  @relation(fields: [vendorId], references: [id])
+  warehouseId  String?
+  warehouse    Warehouse? @relation(fields: [warehouseId], references: [id])
+  orders       CustomerOrder[]
+  notifications Notification[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Vendor {
+  id            String   @id @default(cuid())
+  companyName   String
+  slug          String   @unique
+  contactEmail  String
+  contactPhone  String
+  taxId         String?
+  address       String
+  city          String
+  state         String
+  country       String   @default("Nigeria")
+  category      String
+  description   String
+  leadTimeDays  Int      @default(7)
+  paymentTerms  String   @default("Net 30")
+  status        String   @default("PENDING") // PENDING | APPROVED | SUSPENDED | REJECTED
+  rating        Float    @default(0)
+  onTimeRate    Float    @default(0)
+  fulfillmentRate Float  @default(0)
+  defectRate    Float    @default(0)
+  users         User[]
+  products      Product[]
+  purchaseOrders PurchaseOrder[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  slug        String    @unique
+  description String?
+  products    Product[]
+}
+
+model Warehouse {
+  id          String      @id @default(cuid())
+  name        String
+  code        String      @unique
+  address     String
+  city        String
+  state       String
+  capacity    Int         @default(10000)
+  users       User[]
+  inventory   Inventory[]
+  purchaseOrders PurchaseOrder[]
+  shipments   Shipment[]
+  createdAt   DateTime    @default(now())
+}
+
+model Product {
+  id           String   @id @default(cuid())
+  sku          String   @unique
+  name         String
+  slug         String   @unique
+  description  String
+  priceKobo    Int
+  costKobo     Int
+  unit         String   @default("pcs")
+  weightKg     Float    @default(0.5)
+  imageHint    String
+  status       String   @default("ACTIVE") // ACTIVE | DRAFT | DISCONTINUED
+  vendorId     String
+  vendor       Vendor   @relation(fields: [vendorId], references: [id])
+  categoryId   String
+  category     Category @relation(fields: [categoryId], references: [id])
+  inventory    Inventory[]
+  orderItems   OrderItem[]
+  poItems      PurchaseOrderItem[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Inventory {
+  id            String    @id @default(cuid())
+  productId     String
+  product       Product   @relation(fields: [productId], references: [id])
+  warehouseId   String
+  warehouse     Warehouse @relation(fields: [warehouseId], references: [id])
+  quantity      Int       @default(0)
+  reserved      Int       @default(0)
+  reorderPoint  Int       @default(20)
+  reorderQty    Int       @default(50)
+  movements     StockMovement[]
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([productId, warehouseId])
+}
+
+model StockMovement {
+  id          String    @id @default(cuid())
+  inventoryId String
+  inventory   Inventory @relation(fields: [inventoryId], references: [id])
+  type        String    // IN | OUT | ADJUST | RESERVE | RELEASE
+  quantity    Int
+  reason      String
+  reference   String?
+  createdAt   DateTime  @default(now())
+}
+
+model PurchaseOrder {
+  id           String   @id @default(cuid())
+  poNumber     String   @unique
+  vendorId     String
+  vendor       Vendor   @relation(fields: [vendorId], references: [id])
+  warehouseId  String
+  warehouse    Warehouse @relation(fields: [warehouseId], references: [id])
+  status       String   @default("DRAFT") // DRAFT | SENT | ACKNOWLEDGED | PARTIAL | RECEIVED | CANCELLED
+  notes        String?
+  expectedDate DateTime?
+  subtotalKobo Int      @default(0)
+  items        PurchaseOrderItem[]
+  shipments    Shipment[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model PurchaseOrderItem {
+  id               String        @id @default(cuid())
+  purchaseOrderId  String
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product       @relation(fields: [productId], references: [id])
+  quantity         Int
+  receivedQty      Int           @default(0)
+  unitCostKobo     Int
+}
+
+model CustomerOrder {
+  id              String   @id @default(cuid())
+  orderNumber     String   @unique
+  customerId      String
+  customer        User     @relation(fields: [customerId], references: [id])
+  status          String   @default("PENDING") // PENDING | CONFIRMED | PROCESSING | SHIPPED | DELIVERED | CANCELLED
+  paymentStatus   String   @default("UNPAID") // UNPAID | PAID | REFUNDED
+  shippingName    String
+  shippingPhone   String
+  shippingAddress String
+  shippingCity    String
+  shippingState   String
+  subtotalKobo    Int      @default(0)
+  shippingKobo    Int      @default(250000)
+  totalKobo       Int      @default(0)
+  notes           String?
+  items           OrderItem[]
+  shipments       Shipment[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model OrderItem {
+  id         String        @id @default(cuid())
+  orderId    String
+  order      CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product       @relation(fields: [productId], references: [id])
+  quantity   Int
+  unitPriceKobo Int
+}
+
+model Shipment {
+  id              String   @id @default(cuid())
+  trackingNumber  String   @unique
+  type            String   // INBOUND | OUTBOUND
+  carrier         String
+  status          String   @default("PREPARING") // PREPARING | IN_TRANSIT | OUT_FOR_DELIVERY | DELIVERED | DELAYED
+  origin          String
+  destination     String
+  warehouseId     String?
+  warehouse       Warehouse? @relation(fields: [warehouseId], references: [id])
+  orderId         String?
+  order           CustomerOrder? @relation(fields: [orderId], references: [id])
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  eta             DateTime?
+  deliveredAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  body      String
+  type      String   @default("INFO")
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
