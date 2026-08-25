@@ -15,7 +15,11 @@
   "prisma": {
     "seed": "node prisma/seed.js"
   },
-  "keywords": ["supply-chain", "vendor-management", "ecommerce"],
+  "keywords": [
+    "supply-chain",
+    "vendor-management",
+    "ecommerce"
+  ],
   "license": "MIT",
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -27,6 +31,7 @@
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
+    "resend": "^6.22.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {

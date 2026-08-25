@@ -39,3 +39,10 @@ exports.me = asyncHandler(async (req, res) => {
   const user = await service.me(req.user.id);
   res.json({ user });
 });
+exports.verifyEmail = asyncHandler(async (req, res) => {
+  const { token } = req.query;
+
+  const result = await service.verifyEmail(token);
+
+  res.json(result);
+});

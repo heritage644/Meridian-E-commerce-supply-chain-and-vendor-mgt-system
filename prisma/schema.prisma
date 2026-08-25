@@ -15,6 +15,9 @@ model User {
   phone        String?
   role         String   @default("CUSTOMER") // ADMIN | VENDOR | WAREHOUSE | CUSTOMER
   status       String   @default("ACTIVE") // ACTIVE | SUSPENDED
+  emailVerified   Boolean  @default(false)
+  verificationToken String?
+  verificationTokenExpiresAt DateTime?
   vendorId     String?
   vendor       Vendor?  @relation(fields: [vendorId], references: [id])
   warehouseId  String?
