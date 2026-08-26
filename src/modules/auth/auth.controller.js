@@ -2,6 +2,7 @@ const { z } = require("zod");
 const service = require("./auth.service");
 const asyncHandler = require("../../utils/asyncHandler");
 const { AppError } = require("../../shared/errors");
+const config = require("../../config");
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -39,10 +40,17 @@ exports.me = asyncHandler(async (req, res) => {
   const user = await service.me(req.user.id);
   res.json({ user });
 });
+
 exports.verifyEmail = asyncHandler(async (req, res) => {
   const { token } = req.query;
+  const frontendUrl = config.frontendOrigin || "http://localhost:3000";
 
-  const result = await service.verifyEmail(token);
-
-  res.json(result);
+  try {
+    await service.verifyEmail(token);
+    // Redirect browser directly to frontend login page with a success flag
+    return res.redirect(`${frontendUrl}/login?verified=true`);
+  } catch (error) {
+    // Redirect browser to frontend login page with error message if token fails/expires
+    return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent(error.message)}`);
+  }
 });

@@ -5,12 +5,17 @@ const { AppError } = require("../../shared/errors");
 const crypto = require("crypto");
 const config = require("../../config");
 const { slugify } = require("../../utils/money");
-const {
-  sendVerificationEmail,
-} = require("../../shared/email");
+const { sendVerificationEmail } = require("../../shared/email");
+
 function signToken(user) {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role, vendorId: user.vendorId, warehouseId: user.warehouseId },
+    { 
+      id: user.id, 
+      email: user.email, 
+      role: user.role, 
+      vendorId: user.vendorId, 
+      warehouseId: user.warehouseId 
+    },
     config.jwtSecret,
     { expiresIn: config.jwtExpiresIn }
   );
@@ -51,161 +56,131 @@ async function register({
   const normalizedEmail = email.toLowerCase();
 
   const existing = await prisma.user.findUnique({
-    where: {
-      email: normalizedEmail,
-    },
+    where: { email: normalizedEmail },
   });
 
   if (existing) {
-    throw new AppError(
-      "An account with this email already exists",
-      409
-    );
+    throw new AppError("An account with this email already exists", 409);
   }
 
   const allowed = ["CUSTOMER", "VENDOR"];
-
-  const chosenRole = allowed.includes(role)
-    ? role
-    : "CUSTOMER";
-
+  const chosenRole = allowed.includes(role) ? role : "CUSTOMER";
   const passwordHash = await bcrypt.hash(password, 10);
 
-  /*
-   * Generate a random verification token.
-   * The raw token is sent to the user's email.
-   */
-  const verificationToken = crypto
-    .randomBytes(32)
-    .toString("hex");
+  const verificationToken = crypto.randomBytes(32).toString("hex");
+  const verificationTokenExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-  /*
-   * Token expires after 24 hours.
-   */
-  const verificationTokenExpiresAt = new Date(
-    Date.now() + 24 * 60 * 60 * 1000
-  );
+  // Wrap creation inside an interactive transaction
+  const user = await prisma.$transaction(async (tx) => {
+    let vendorId = null;
 
-  let vendorId = null;
+    if (chosenRole === "VENDOR") {
+      if (!companyName) {
+        throw new AppError("Company name is required for vendor registration", 400);
+      }
 
-  if (chosenRole === "VENDOR") {
-    if (!companyName) {
-      throw new AppError(
-        "Company name is required for vendor registration"
-      );
+      const slugBase = slugify(companyName);
+      let slug = slugBase;
+      let i = 1;
+
+      while (await tx.vendor.findUnique({ where: { slug } })) {
+        slug = `${slugBase}-${i++}`;
+      }
+
+      const vendor = await tx.vendor.create({
+        data: {
+          companyName,
+          slug,
+          contactEmail: normalizedEmail,
+          contactPhone: phone || "",
+          address: address || "Address pending",
+          city: city || "Lagos",
+          state: state || "Lagos",
+          category: category || "General",
+          description: `${companyName} applied to supply on Meridian.`,
+          status: "PENDING",
+        },
+      });
+
+      vendorId = vendor.id;
     }
 
-    const slugBase = slugify(companyName);
-
-    let slug = slugBase;
-    let i = 1;
-
-    while (
-      await prisma.vendor.findUnique({
-        where: { slug },
-      })
-    ) {
-      slug = `${slugBase}-${i++}`;
-    }
-
-    const vendor = await prisma.vendor.create({
+    return await tx.user.create({
       data: {
-        companyName,
-        slug,
-        contactEmail: normalizedEmail,
-        contactPhone: phone || "",
-        address: address || "Address pending",
-        city: city || "Lagos",
-        state: state || "Lagos",
-        category: category || "General",
-        description: `${companyName} applied to supply on Meridian.`,
-        status: "PENDING",
+        email: normalizedEmail,
+        passwordHash,
+        fullName,
+        phone,
+        role: chosenRole,
+        vendorId,
+        emailVerified: false,
+        verificationToken,
+        verificationTokenExpiresAt,
+      },
+      include: {
+        vendor: true,
+        warehouse: true,
       },
     });
+  });
 
-    vendorId = vendor.id;
+  // Safe Email Dispatch with Cleanup Rollback
+  try {
+    await sendVerificationEmail({
+      email: user.email,
+      fullName: user.fullName,
+      verificationToken,
+    });
+  } catch (emailError) {
+    // If sending fails (e.g., Resend sandbox limit), rollback created user & vendor records
+    await prisma.user.delete({ where: { id: user.id } });
+    if (user.vendorId) {
+      await prisma.vendor.delete({ where: { id: user.vendorId } });
+    }
+
+    console.error("Resend Email Error:", emailError.message);
+    throw new AppError(
+      "Failed to send verification email. " +
+        (process.env.NODE_ENV !== "production"
+          ? "Resend sandbox only allows sending to registered developer email."
+          : "Please try again later."),
+      500
+    );
   }
 
-  const user = await prisma.user.create({
-    data: {
-      email: normalizedEmail,
-      passwordHash,
-      fullName,
-      phone,
-      role: chosenRole,
-      vendorId,
-
-      emailVerified: false,
-      verificationToken,
-      verificationTokenExpiresAt,
-    },
-
-    include: {
-      vendor: true,
-      warehouse: true,
-    },
-  });
-
-  /*
-   * Send the verification email.
-   */
-  await sendVerificationEmail({
-    email: user.email,
-    fullName: user.fullName,
-    verificationToken,
-  });
-
-  /*
-   * Don't issue a JWT yet.
-   * The user needs to verify their email first.
-   */
   return {
-    message:
-      "Account created successfully. Please check your email to verify your account.",
+    message: "Account created successfully.Please check your email to verify your account.",
   };
 }
+
 async function verifyEmail(token) {
   if (!token) {
-    throw new AppError(
-      "Verification token is required",
-      400
-    );
+    throw new AppError("Verification token is required", 400);
   }
 
   const user = await prisma.user.findFirst({
-    where: {
-      verificationToken: token,
-    },
+    where: { verificationToken: token },
   });
 
   if (!user) {
-    throw new AppError(
-      "Invalid verification link",
-      400
-    );
+    throw new AppError("Invalid verification link", 400);
   }
 
   if (
     !user.verificationTokenExpiresAt ||
-    user.verificationTokenExpiresAt < new Date()
+    new Date(user.verificationTokenExpiresAt).getTime() < Date.now()
   ) {
-    throw new AppError(
-      "Verification link has expired",
-      400
-    );
+    throw new AppError("Verification link has expired", 400);
   }
 
+  // Update record directly
   const updatedUser = await prisma.user.update({
-    where: {
-      id: user.id,
-    },
-
+    where: { id: user.id },
     data: {
       emailVerified: true,
       verificationToken: null,
       verificationTokenExpiresAt: null,
     },
-
     include: {
       vendor: true,
       warehouse: true,
@@ -223,16 +198,20 @@ async function login({ email, password }) {
     where: { email: email.toLowerCase() },
     include: { vendor: true, warehouse: true },
   });
+  
   if (!user) throw new AppError("Invalid email or password", 401);
+
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) throw new AppError("Invalid email or password", 401);
+
   if (!user.emailVerified) {
-  throw new AppError(
-    "Please verify your email before logging in",
-    403
-  );
-}
-  if (user.status !== "ACTIVE") throw new AppError("Account is suspended", 403);
+    throw new AppError("Please verify your email before logging in", 403);
+  }
+
+  if (user.status !== "ACTIVE") {
+    throw new AppError("Account is suspended", 403);
+  }
+
   return { token: signToken(user), user: publicUser(user) };
 }
 
@@ -241,6 +220,7 @@ async function me(id) {
     where: { id },
     include: { vendor: true, warehouse: true },
   });
+  
   if (!user) throw new AppError("User not found", 404);
   return publicUser(user);
 }

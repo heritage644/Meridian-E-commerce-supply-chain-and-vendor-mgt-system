@@ -8,10 +8,17 @@ async function sendVerificationEmail({
   fullName,
   verificationToken,
 }) {
-  const verificationUrl =
-    `${config.backendOrigin}/api/auth/verify-email?token=${encodeURIComponent(
-      verificationToken
-    )}`;
+  const backendOrigin = config.backendOrigin || "http://localhost:4000";
+
+  const verificationUrl = `${backendOrigin}/api/auth/verify-email?token=${encodeURIComponent(
+    verificationToken
+  )}`;
+
+  // Print link directly to server terminal for instant local testing
+  console.log("\n=======================================================");
+  console.log("📬 VERIFICATION LINK GENERATED:");
+  console.log(verificationUrl);
+  console.log("=======================================================\n");
 
   const { data, error } = await resend.emails.send({
     from: config.emailFrom,
