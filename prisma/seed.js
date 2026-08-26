@@ -90,7 +90,7 @@ async function main() {
       warehouseId: warehouses[0].id,
     },
   });
-  // 5. Vendors
+  
 const vendors = await Promise.all([
   prisma.vendor.create({
     data: {
